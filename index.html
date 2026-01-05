@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live TV Feed</title>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+
+<style>
+  html,body{
+    margin:0;
+    padding:0;
+    height:100%;
+    background:black;
+    overflow:hidden;
+    font-family:Arial,sans-serif;
+    position:relative;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: 
+      radial-gradient(circle at 20% 80%, rgba(120, 219, 255, 0.15) 0%, transparent 50%),
+      radial-gradient(circle at 80% 20%, rgba(120, 219, 255, 0.15) 0%, transparent 50%),
+      radial-gradient(circle at 50% 50%, rgba(200, 240, 255, 0.1) 0%, transparent 60%);
+    z-index: 1;
+  }
+
+  .snowflake {
+    position: fixed;
+    top: -10px;
+    color: #fff;
+    font-size: 1.2em;
+    pointer-events: none;
+    opacity: 0.8;
+    animation: fall linear infinite;
+    z-index: 2;
+  }
+
+  @keyframes fall {
+    to {
+      transform: translateY(100vh) translateX(var(--drift));
+    }
+  }
+
+  .warm-glow {
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(circle at center, rgba(255, 200, 150, 0.08) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .container{
+    height:100vh;
+    overflow-y:scroll;
+    scroll-snap-type:y mandatory;
+    scroll-behavior:smooth;
+    -webkit-overflow-scrolling:touch;
+    position: relative;
+    z-index: 3;
+  }
+  .channel{
+    height:100vh;
+    width:100vw;
+    position:relative;
+    scroll-snap-align:start;
+    scroll-snap-stop:always;
+    box-shadow: 0 0 40px rgba(100, 200, 255, 0.2) inset;
+  }
+
+  video{
+    width:100%;
+    height:100%;
+    object-fit:contain;
+    background:transparent !important;
+    opacity: 0;
+    transition: opacity 1.4s ease;
+  }
+  video.playing {
+    opacity: 1;
+  }
+
+  .loading{
+    position:absolute;
+    inset:0;
+    background:rgba(0,0,0,0.35);
+    color:white;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:26px;
+    opacity:0;
+    pointer-events:none;
+    transition:opacity 0.6s ease;
+    z-index: 5;
+    text-align: center;
+  }
+  .loading.show{
+    opacity:1;
+    pointer-events:all;
+  }
+  .loading-text {
+    font-family: 'Georgia', serif;
+    font-weight: normal;
+    letter-spacing: 4px;
+    text-shadow: 0 0 20px rgba(0, 255, 255, 0.6);
+    animation: pulse 2.5s ease-in-out infinite, typing 3.5s steps(12) infinite;
+    overflow: hidden;
+    white-space: nowrap;
+    border-right: 3px solid rgba(0, 255, 255, 0.8);
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 1; }
+  }
+
+  @keyframes typing {
+    0% { width: 0; }
+    50% { width: 140px; }
+    90%, 100% { width: 140px; }
+  }
+
+  .overlay{
+    position:absolute;
+    bottom:20px;
+    left:20px;
+    color:white;
+    text-shadow: 0 0 15px rgba(0, 255, 255, 0.8), 0 0 5px black;
+    z-index: 4;
+  }
+  .live{
+    background:rgba(255,0,0,0.8);
+    padding:4px 12px;
+    border-radius:8px;
+    font-size:12px;
+    box-shadow: 0 0 15px rgba(255,0,0,0.6);
+  }
+  .name{
+    font-size:24px;
+    margin-top:8px;
+    font-weight: bold;
+    text-shadow: 0 0 20px rgba(100, 255, 255, 0.9);
+  }
+  .desc{opacity:.9; text-shadow: 0 0 10px black;}
+
+  .search-bar{
+    position:fixed;
+    top:12px;
+    left:50%;
+    transform:translateX(-50%);
+    width:80%;
+    max-width:420px;
+    background:rgba(255,255,255,.15);
+    backdrop-filter:blur(12px);
+    border-radius:30px;
+    padding:10px 18px;
+    z-index:2000;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    opacity:1;
+    transition:opacity .4s ease;
+    box-shadow: 0 0 20px rgba(100, 255, 255, 0.4);
+    border: 1px solid rgba(100, 255, 255, 0.2);
+  }
+  .search-bar.hidden{opacity:0; pointer-events:none;}
+  .search-bar input{
+    background:none;
+    border:none;
+    outline:none;
+    color:white;
+    width:100%;
+    font-size:16px;
+  }
+
+  .search-float{
+    position:fixed;
+    top:14px;
+    right:80px;
+    font-size:22px;
+    background:rgba(255,255,255,.25);
+    backdrop-filter:blur(10px);
+    padding:10px 12px;
+    border-radius:50%;
+    z-index:2000;
+    display:none;
+    cursor:pointer;
+    box-shadow: 0 0 15px rgba(100, 255, 255, 0.5);
+  }
+  .search-float.show{display:block;}
+
+  /* Glowing Gamepad Button */
+  .game-hub-btn {
+    position: fixed;
+    bottom: 28px;
+    right: 28px;
+    font-size: 36px;
+    z-index: 2000;
+    cursor: pointer;
+    text-shadow: 0 0 20px rgba(0, 255, 255, 0.9);
+    animation: glow-pulse 2s ease-in-out infinite;
+    transition: transform 0.2s ease;
+  }
+  .game-hub-btn:hover { transform: scale(1.15); }
+  .game-hub-btn:active { transform: scale(0.95); }
+
+  @keyframes glow-pulse {
+    0%, 100% { text-shadow: 0 0 20px rgba(0, 255, 255, 0.8); }
+    50% { text-shadow: 0 0 40px rgba(0, 255, 255, 1), 0 0 60px rgba(0, 255, 255, 0.6); }
+  }
+
+  /* Game Hub - Small Neat Cards loaded from games.json */
+  #gameHub {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.95);
+    backdrop-filter: blur(10px);
+    z-index: 3000;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 20px;
+    overflow-y: auto;
+    color: white;
+  }
+  #gameHub.show { display: flex; }
+
+  #gameHub .game-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 18px;
+    max-width: 1400px;
+    width: 100%;
+    margin-top: 70px;
+  }
+
+  #gameHub .game-card {
+    background: rgba(255,255,255,0.07);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0, 255, 255, 0.2);
+    transition: all 0.3s ease;
+    border: 1px solid rgba(100, 255, 255, 0.15);
+  }
+
+  #gameHub .game-card:hover {
+    transform: translateY(-8px);
+    box-shadow: 0 8px 30px rgba(0, 255, 255, 0.4);
+  }
+
+  #gameHub .game-card iframe {
+    width: 100%;
+    height: 220px;
+    border: none;
+    background: #000;
+    display: block;
+  }
+
+  #gameHub .game-title {
+    padding: 10px;
+    font-size: 16px;
+    font-weight: bold;
+    text-align: center;
+    background: rgba(0, 255, 255, 0.1);
+    text-shadow: 0 0 8px rgba(0, 255, 255, 0.5);
+  }
+
+  #gameHub .close-game-hub {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    font-size: 34px;
+    cursor: pointer;
+    background: rgba(255,255,255,0.15);
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 0 20px rgba(255,255,255,0.3);
+    transition: all 0.2s;
+  }
+  #gameHub .close-game-hub:hover {
+    background: rgba(255,50,50,0.3);
+    transform: scale(1.1);
+  }
+
+  #popup {
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,.7);
+    display:none;
+    align-items:center;
+    justify-content:center;
+    z-index:9999;
+    backdrop-filter: blur(5px);
+  }
+  #popup > div {
+    background:#0f1a2b;
+    color:white;
+    padding:26px;
+    border-radius:20px;
+    max-width:340px;
+    width:85%;
+    text-align:center;
+    box-shadow:0 0 40px rgba(100, 255, 255, 0.6);
+    border: 1px solid rgba(100, 255, 255, 0.3);
+    animation:pop .35s ease;
+  }
+  .popup-warning { background:#ffcc00; box-shadow:0 0 35px rgba(255,215,0,.7); color:#000; }
+  .popup-error   { background:#ff4444; box-shadow:0 0 35px rgba(255,0,0,.7); }
+
+  @keyframes pop{
+    from{transform:scale(.8);opacity:0}
+    to{transform:scale(1);opacity:1}
+  }
+</style>
+</head>
+<body>
+
+<div class="warm-glow"></div>
+
+<div id="popup">
+  <div>
+    <h2 id="pTitle" style="margin-top:0;"></h2>
+    <p id="pText" style="opacity:.9;"></p>
+    <button id="pBtn" style="margin-top:14px;padding:10px 24px;background:#0ff;color:#000;border:none;border-radius:14px;font-weight:bold;cursor:pointer;box-shadow:0 0 15px rgba(0,255,255,0.8);">Close</button>
+  </div>
+</div>
+
+<div class="search-bar" id="searchBar">
+  🔍
+  <input id="searchInput" placeholder="Search channels...">
+</div>
+
+<div class="search-float" id="searchFloat">🔎</div>
+
+<div class="container" id="feed"></div>
+
+<!-- Gamepad Button -->
+<div class="game-hub-btn" id="gameHubBtn">🎮</div>
+
+<!-- Game Hub - Dynamically populated from games.json -->
+<div id="gameHub">
+  <div class="close-game-hub" id="closeGameHub">✖</div>
+  <div class="game-grid" id="gameGrid">
+    <!-- Games will be loaded here from games.json -->
+  </div>
+</div>
+
+<script>
+// Snow effect
+function createSnowflake() {
+  const flake = document.createElement('div');
+  flake.className = 'snowflake';
+  flake.textContent = ['❄', '❅', '❆'][Math.floor(Math.random() * 3)];
+  flake.style.left = Math.random() * 100 + 'vw';
+  flake.style.animationDuration = Math.random() * 8 + 8 + 's';
+  flake.style.fontSize = Math.random() * 0.8 + 0.8 + 'em';
+  flake.style.opacity = Math.random() * 0.5 + 0.5;
+  flake.style.setProperty('--drift', (Math.random() * 100 - 50) + 'px');
+  document.body.appendChild(flake);
+
+  setTimeout(() => flake.remove(), parseFloat(flake.style.animationDuration) * 1000 + 500);
+}
+
+setInterval(createSnowflake, 300);
+for (let i = 0; i < 20; i++) setTimeout(createSnowflake, i * 200);
+
+const feed = document.getElementById('feed');
+let channels = [];
+let activeVideo = null;
+
+const hlsConfig = {
+  lowLatencyMode: true,
+  liveSyncDurationCount: 2,
+  liveMaxLatencyDurationCount: 4,
+  maxLiveSyncPlaybackRate: 1.15,
+  maxBufferLength: 10,
+  maxMaxBufferLength: 15,
+  maxBufferSize: 30 * 1000 * 1000,
+  backBufferLength: 5,
+  startLevel: -1,
+  abrEwmaDefaultEstimate: 1000000,
+  initialLiveManifestSize: 2,
+  enableWorker: true,
+  nudgeOffset: 0.05,
+  nudgeMaxRetry: 15
+};
+
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    const section = entry.target;
+    const video = section.querySelector('video');
+    const loading = section.querySelector('.loading');
+    let hls = section._hls;
+
+    if (entry.intersectionRatio >= 0.3) {
+      loading.classList.add('show');
+
+      if (!hls && video.dataset.url) {
+        if (Hls.isSupported()) {
+          hls = new Hls(hlsConfig);
+          hls.loadSource(video.dataset.url);
+          hls.attachMedia(video);
+          section._hls = hls;
+
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            video.play().catch(() => {});
+          });
+
+          hls.on(Hls.Events.ERROR, (event, data) => {
+            if (data.fatal) {
+              console.error('HLS fatal error:', data);
+              loading.innerHTML = '<div style="font-size:20px;">Stream error<br>Try scrolling away and back</div>';
+            }
+          });
+        } else {
+          video.src = video.dataset.url;
+          video.load();
+          video.play().catch(() => {});
+        }
+      } else if (hls) {
+        hls.startLoad();
+      }
+
+      video.onplaying = () => {
+        video.classList.add('playing');
+        loading.classList.remove('show');
+      };
+      video.onwaiting = () => loading.classList.add('show');
+      video.onpause = () => video.classList.remove('playing');
+      video.onerror = () => {
+        loading.innerHTML = '<div style="font-size:20px;">Failed to load stream</div>';
+      };
+
+      if (entry.intersectionRatio >= 0.85) {
+        if (video !== activeVideo) {
+          activeVideo = video;
+          document.querySelectorAll('video').forEach(v => {
+            if (v === video) {
+              v.muted = false;
+              v.play().then(() => {
+                v.classList.add('playing');
+                loading.classList.remove('show');
+              }).catch(() => {});
+            } else {
+              v.pause();
+              v.muted = true;
+              v.classList.remove('playing');
+            }
+          });
+        }
+      }
+    } else {
+      if (hls) hls.stopLoad();
+      video.pause();
+      video.classList.remove('playing');
+      if (video === activeVideo) activeVideo = null;
+      loading.classList.remove('show');
+    }
+  });
+}, { threshold: [0, 0.3, 0.85] });
+
+function render(list) {
+  feed.innerHTML = '';
+  activeVideo = null;
+
+  list.forEach(c => {
+    const section = document.createElement('section');
+    section.className = 'channel';
+    section.innerHTML = `
+      <video playsinline data-url="${c.url}" poster="${c.poster || ''}"></video>
+      <div class="loading">
+        <div class="loading-text">Loading........</div>
+      </div>
+      <div class="overlay">
+        <span class="live">LIVE</span>
+        <div class="name">${c.name}</div>
+        <div class="desc">${c.desc}</div>
+      </div>`;
+    feed.appendChild(section);
+
+    section._hls = null;
+    observer.observe(section);
+  });
+}
+
+const searchBar = document.getElementById('searchBar');
+const searchFloat = document.getElementById('searchFloat');
+const searchInput = document.getElementById('searchInput');
+
+function hideSearch() {
+  searchBar.classList.add('hidden');
+  searchFloat.classList.add('show');
+}
+function showSearch() {
+  searchBar.classList.remove('hidden');
+  searchFloat.classList.remove('show');
+  searchInput.focus();
+  autoHide();
+}
+let hideTimer;
+function autoHide() {
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(hideSearch, 12000);
+}
+searchFloat.onclick = showSearch;
+
+searchInput.oninput = () => {
+  const q = searchInput.value.trim().toLowerCase();
+  const filtered = channels.filter(c => 
+    c.name.toLowerCase().includes(q) || 
+    (c.desc && c.desc.toLowerCase().includes(q))
+  );
+  render(filtered);
+};
+
+/* Load Channels from channels.json */
+fetch('channels.json')
+  .then(res => res.json())
+  .then(data => {
+    channels = data;
+    render(channels);
+    autoHide();
+  })
+  .catch(err => console.error('Failed to load channels.json', err));
+
+/* Load Popup Message */
+fetch('message.json')
+  .then(res => res.json())
+  .then(msg => {
+    if (msg.enabled) {
+      document.getElementById('pTitle').textContent = msg.title || '';
+      document.getElementById('pText').textContent = msg.message || '';
+      document.getElementById('pBtn').textContent = msg.button || 'Close';
+
+      const popupContainer = document.querySelector('#popup > div');
+      popupContainer.className = '';
+      if (msg.type === 'warning') popupContainer.classList.add('popup-warning');
+      else if (msg.type === 'error') popupContainer.classList.add('popup-error');
+
+      document.getElementById('popup').style.display = 'flex';
+    }
+  })
+  .catch(() => {});
+
+document.getElementById('pBtn').onclick = () => {
+  document.getElementById('popup').style.display = 'none';
+};
+
+/* Game Hub - Load games from games.json */
+const gameHub = document.getElementById('gameHub');
+const gameGrid = document.getElementById('gameGrid');
+const gameHubBtn = document.getElementById('gameHubBtn');
+const closeGameHub = document.getElementById('closeGameHub');
+
+function renderGames(games) {
+  if (games.length === 0) {
+    gameGrid.innerHTML = '<p style="color:#fff; grid-column:1/-1; text-align:center; font-size:18px;">No games available</p>';
+    return;
+  }
+
+  gameGrid.innerHTML = '';
+  games.forEach(game => {
+    const card = document.createElement('div');
+    card.className = 'game-card';
+    card.innerHTML = `
+      <iframe src="${game.url}" allowfullscreen loading="lazy"></iframe>
+      <div class="game-title">${game.name}</div>
+    `;
+    gameGrid.appendChild(card);
+  });
+}
+
+fetch('games.json')
+  .then(res => {
+    if (!res.ok) throw new Error('games.json not found or error');
+    return res.json();
+  })
+  .then(data => {
+    renderGames(data);
+  })
+  .catch(err => {
+    console.error('Failed to load games.json:', err);
+    gameGrid.innerHTML = '<p style="color:#ff6666; grid-column:1/-1; text-align:center; font-size:18px;">Error loading games</p>';
+  });
+
+gameHubBtn.onclick = () => {
+  gameHub.classList.add('show');
+  // Pause all TV streams
+  document.querySelectorAll('video').forEach(v => {
+    v.pause();
+    v.classList.remove('playing');
+  });
+};
+
+closeGameHub.onclick = () => {
+  gameHub.classList.remove('show');
+};
+
+// Close with Escape key
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && gameHub.classList.contains('show')) {
+    gameHub.classList.remove('show');
+  }
+});
+
+</script>
+</body>
+</html>

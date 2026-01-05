@@ -1,0 +1,22 @@
+[
+  {
+    "name": "Snake Classic",
+    "url": "https://yourdomain.com/games/snake.html"
+  },
+  {
+    "name": "Space Shooter",
+    "url": "https://yourdomain.com/games/shooter/index.html"
+  },
+  {
+    "name": "Puzzle Adventure",
+    "url": "https://example.com/my-puzzle-game/"
+  },
+  {
+    "name": "Racing Pro",
+    "url": "./games/racing.html"
+  },
+  {
+    "name": "Tetris Remix",
+    "url": "https://cdn.example.com/tetris/game.html"
+  }
+]
